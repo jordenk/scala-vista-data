@@ -1,20 +1,33 @@
 package com.github.jordenk.ingest
 
+import cats.effect.Sync
 import fs2.{Pipe, text}
-import io.circe._
+import io.chrisdavenport.log4cats.Logger
 import io.circe.parser.decode
+import cats.implicits._
 
 object Extractor {
 
-  def decodeJsonLine(jsonString: String): Either[Error, InputBlock] = decode[InputBlock](jsonString)
+  def decodeJsonLine(jsonString: String): Either[ExtractorError, InputBlock] =
+    decode[InputBlock](jsonString) match {
+      case Left(circeError)  => ExtractorError(s"""
+           |Could not decode input json string. Decoding error: ${circeError.getMessage}
+           |Raw input string: $jsonString
+           |""".stripMargin).asLeft
+      case Right(inputBlock) => inputBlock.asRight
 
-  def bytesToInputBlocks[F[_]](): Pipe[F, Byte, InputBlock] =
+    }
+
+  def bytesToInputBlocks[F[_]: Sync: Logger](): Pipe[F, Byte, InputBlock] =
     bytesStream => {
       bytesStream
         .through(text.utf8Decode)
         .through(text.lines)
         .map(decodeJsonLine)
-        // TODO log errors
+        .evalTap({
+          case Right(_)    => Sync[F].unit
+          case Left(error) => Logger[F].warn(error.message)
+        })
         .collect({ case Right(inputBlock) => inputBlock })
         .filter(block => FunctionBlockKindsToKeep.contains(block.functionBlock.kind))
     }
@@ -34,3 +47,5 @@ object Extractor {
   )
 
 }
+
+case class ExtractorError(message: String)

@@ -3,6 +3,8 @@ import cats.effect.{Blocker, ContextShift, ExitCode, IO, IOApp, Sync}
 import com.github.jordenk.ingest.Extractor._
 import fs2.Stream
 import fs2.io.file.readAll
+import io.chrisdavenport.log4cats.SelfAwareStructuredLogger
+import io.chrisdavenport.log4cats.slf4j.Slf4jLogger
 import io.circe.DecodingFailure
 import org.scalatest.flatspec.AnyFlatSpec
 import org.scalatest.matchers.should.Matchers.{convertToAnyShouldWrapper, matchPattern}
@@ -53,15 +55,17 @@ class ExtractorSpec extends AnyFlatSpec with IOApp {
 
   it should "return an error when decoding fails." in {
     val invalidInputJsonString = """{"package_name":"cats.instances"}"""
-    val actualInputBlock = decodeJsonLine(invalidInputJsonString)
-    actualInputBlock should matchPattern {
-      case Left(_: DecodingFailure) =>
+    val decodingResult = decodeJsonLine(invalidInputJsonString)
+    decodingResult should matchPattern {
+      case Left(_: ExtractorError) =>
     }
   }
 
   "bytesToInputBlocks" should "decode and keep InputJson with function block kinds in FunctionBlockKindsToKeep." in {
+    implicit def unsafeLogger[F[_]: Sync]: SelfAwareStructuredLogger[F] = Slf4jLogger.getLogger[F]
+
     val inputBlocks = inputByteStream
-      .through(bytesToInputBlocks())
+      .through(bytesToInputBlocks[IO]())
       .compile
       .toList
       .unsafeRunSync()
@@ -70,31 +74,4 @@ class ExtractorSpec extends AnyFlatSpec with IOApp {
 
     functionBlockKinds.toSet shouldBe FunctionBlockKindsToKeep.toSet
   }
-
-//  it should "println." in {
-//    val kinds = inputByteStream
-//      .map(decodeJsonLine)
-//      .collect({
-//        case Right(value) => value
-//      })
-//      .filter(_.functionBlock.kind == DefFbk)
-//      .filter(_.functionBlock.label == "collectFirst")
-//      .compile
-//      .toList
-//      .unsafeRunSync()
-//
-//    for {
-//      i <- (1 to 20)
-//      k = kinds(i)
-//      _ = println()
-//
-//      _ = println(k.functionBlock.label)
-//      _ = println(k.functionBlock.member)
-//      _ = println(k.functionBlock.tail)
-//
-//    } yield ()
-//
-//    1 shouldBe 1
-//  }
-
 }
